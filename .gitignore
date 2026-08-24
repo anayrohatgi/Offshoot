@@ -1,0 +1,31 @@
+# secrets
+.env
+
+# persistent state (owned by the Coordinator; never committed)
+state.db
+*.db
+*.db-journal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# editor / OS cruft
+.DS_Store
+.vscode/
+.idea/
+
+# local Claude Code config (machine-specific, not shared)
+.claude/settings.local.json
+
+# personal project notes, kept out of the public repo by choice
+CLAUDE.md
