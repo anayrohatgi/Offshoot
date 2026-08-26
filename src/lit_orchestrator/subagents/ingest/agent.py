@@ -26,6 +26,6 @@ ingest_agent = AgentDefinition(
     tools=None,
     mcpServers=["ingest-tools"],
 
-    model="haiku", 
-    maxTurns = 3
+    model="haiku",
+    maxTurns = 10
 )
