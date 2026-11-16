@@ -1,31 +1,32 @@
 """AgentDefinition for the Ingest subagent.
 
-This only defines the subagent (its prompt, its tool access).
-The Coordinator invokes it via the Task tool in the lit_orchestrator.coordinator.
+Deterministic fetch with no LLM judgment. It is still a subagent, invoked by
+the Coordinator through the Task tool, so every stage is delegated the same way.
 """
 
 from claude_agent_sdk import AgentDefinition
-from lit_orchestrator.subagents.ingest.tools import ingest_tools_server
+
+from lit_orchestrator.config import SERVER_NAME
 
 INGEST_AGENT_NAME = "ingest"
-
+INGEST_TOOL = f"mcp__{SERVER_NAME}__fetch_arxiv_candidates"
 
 ingest_agent = AgentDefinition(
     description=(
-        "Fetches candidate arXiv papers within a lookback window. "
-        "Metadata only — no relevance judgment, no extraction."
+        "Fetches candidate arXiv paper metadata for a lookback window. "
+        "Metadata only: no relevance judgment, no extraction."
     ),
     prompt=(
-        "You are the Ingest subagent for a literature-monitoring tool.\n\n"
-        "You will be told: a list of arXiv category codes, a lookback window in days, and a max_results cap.\n\n"
-        "Call the fetch_arxiv_candidates tool exactly once with those arguments. "
-        "Then return its output verbatim as your final answer: the JSON array of paper objects, unmodified. "
-        "Do not summarize, filter, rank, or comment on the papers. Do not judge relevance. "
-        "If the tool returns an empty list, return an empty JSON array."
+        "You are the Ingest subagent of a literature-monitoring pipeline.\n\n"
+        "You will be given two lists of arXiv category codes, a lookback window "
+        "in days, and a max_results cap. Call fetch_arxiv_candidates exactly once "
+        "with exactly those values. The tool stores the papers itself.\n\n"
+        "Then reply with one line: the tool's response text. Do not list, "
+        "summarise, filter, or judge papers. If the tool reports an error, call "
+        "it one more time; if it fails again, reply with the error text."
     ),
-    tools=None,
-    mcpServers=["ingest-tools"],
-
+    tools=[INGEST_TOOL],
+    mcpServers=[SERVER_NAME],
     model="haiku",
-    maxTurns = 10
+    maxTurns=4,
 )

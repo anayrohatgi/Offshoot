@@ -6,6 +6,10 @@ state.db
 *.db
 *.db-journal
 
+# fetched paper text and the hand-labelled calibration set
+cache/
+calibration/
+
 # Python
 __pycache__/
 *.pyc

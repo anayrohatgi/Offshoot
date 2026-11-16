@@ -1,0 +1,44 @@
+{
+  "paper": {
+    "arxiv_id": "2609.19453",
+    "title": "Sharpness-Aware Minimization (SAM) Improves Classification Accuracy of Bacterial Raman Spectral Data Enabling Portable Diagnostics",
+    "authors": ["Kaitlin Zareno", "Jarett Dewbury", "Loza F. Tadesse", "Siamak K. Sorooshyari", "Hossein Mobahi"],
+    "source_url": "https://arxiv.org/abs/2609.19453",
+    "categories": ["cs.LG", "q-bio.QM", "stat.ML"],
+    "pages": null,
+    "published": "2026-09-16"
+  },
+  "objective": "Test whether Sharpness-Aware Minimization (SAM), used in place of Adam, improves generalization of a ResNet classifier on small, high-variance clinical Raman spectral data for bacterial pathogen identification.",
+  "findings": [
+    {"text": "SAM achieved accuracy improvements of up to 10.5% on a single split, and an increase in average accuracy of 2.7% across all splits in spectral classification tasks over the traditional optimizer, Adam.", "section": "Abstract"},
+    {"text": "Across GELU, ReLU, and SELU activations, SAM decreased expected variance in accuracy by 79.1%, 75.2%, and 84.3% on average, respectively.", "section": "4 Results and Discussion"}
+  ],
+  "limitations": [
+    {"text": "We recognize that further exploration is required to determine the viability of SAM across different datasets and architectures. Furthermore, we acknowledge that the clinical dataset employed in this study may not comprehensively represent patient demographics and may not account for the variance encountered when collecting spectra samples from different Raman instruments.", "section": "5 Conclusion, Limitations"}
+  ],
+  "future_work": [],
+  "fixed_date_note": null,
+  "candidate_project": {
+    "deliverable": "A rerun of the paper's Adam-vs-SAM comparison on a second, architecturally different Raman classification setup (a shallow 1D-CNN instead of their ResNet, on a different public bacterial Raman dataset), with a results table testing the limitation the authors named: whether SAM's gain generalizes across datasets and architectures.",
+    "steps": [
+      "Pull a second public clinical or bacterial Raman spectral dataset (their own is Ho et al. 2019's public set) and define a shallow 1D-CNN to stand in for their 25-layer ResNet.",
+      "Reuse their public SAM implementation to train both Adam and SAM baselines with matched subject-level train/test splitting, across the same three activation functions.",
+      "Report whether SAM's accuracy gain and variance reduction replicate on the new dataset/architecture pair, or whether the effect is specific to their ResNet + Ho et al. setup."
+    ]
+  },
+  "artifacts": {
+    "code_url": "https://github.com/Tadesse-Lab/SAM-Raman-Diagnostics",
+    "data_public": true,
+    "checkpoints": false
+  },
+  "compute_evidence": {"text": "We trained all models on a single host having 1 NVIDIA T4 GPU.", "section": "3.2"},
+  "tractability_evidence": {"text": "To demonstrate our algorithm's performance, we used publicly available spectral data from a leading Raman spectroscopy and CNN-based work by Ho et al. (2019)... Code is available at: https://github.com/Tadesse-Lab/SAM-Raman-Diagnostics", "section": "3.1, Abstract"},
+  "learning_delta": {
+    "unfamiliar_items": ["SAM's flat-minima optimization objective (vs. Adam)", "subject-level train/test splitting for clinical spectral data", "Raman spectral preprocessing for bacterial classification"],
+    "level": "bounded"
+  },
+  "disqualifier": null,
+  "compute_gate": "fits_free_colab",
+  "tractability": "deliverable_named",
+  "verdict": "pass"
+}

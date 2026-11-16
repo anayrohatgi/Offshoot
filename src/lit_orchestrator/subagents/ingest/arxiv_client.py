@@ -10,17 +10,19 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 BASE_URL = "https://export.arxiv.org/api/query"
-USER_AGENT = "lit-orchestrator/0.1 (personal research monitor)"
+USER_AGENT = "offshoot/0.1 (personal research monitor)"
 
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 ARXIV_NS = "{http://arxiv.org/schemas/atom}"
 
 _ARXIV_DATE_FMT = "%Y%m%d%H%M"
 _ID_VERSION_RE = re.compile(r"v\d+$")
+_PAGES_RE = re.compile(r"(\d+)\s*pages", re.IGNORECASE)
 
 
 def fetch_candidates(
-    categories: list[str],
+    bio_categories: list[str],
+    ml_categories: list[str],
     lookback_days: int = 5,
     max_results: int = 100,
     page_size: int = 100,
@@ -28,7 +30,8 @@ def fetch_candidates(
 ) -> list[dict]:
     """Return metadata-only candidates from arXiv, newest first.
 
-    categories: arXiv category codes, e.g. ["cs.AI", "cs.LG"].
+    A paper must carry at least one category from each list, which is how
+    "q-bio cross-listed with cs.LG/cs.AI" is expressed to the arXiv API.
     lookback_days: how many days back (from now, UTC) to search.
     max_results: hard cap on papers returned across all pages.
     page_size: arXiv results per HTTP request (arXiv caps this around 2000;
@@ -37,7 +40,7 @@ def fetch_candidates(
     request_delay_seconds: pause between paginated requests, per arXiv's
         usage guidance of ~3s between calls in a burst.
     """
-    search_query = _build_search_query(categories, lookback_days)
+    search_query = _build_search_query(bio_categories, ml_categories, lookback_days)
 
     papers: list[dict] = []
     start = 0
@@ -71,16 +74,19 @@ def fetch_candidates(
     return papers[:max_results]
 
 
-def _build_search_query(categories: list[str], lookback_days: int) -> str:
+def _build_search_query(
+    bio_categories: list[str], ml_categories: list[str], lookback_days: int
+) -> str:
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
-    cat_clause = " OR ".join(f"cat:{c}" for c in categories)
+    bio_clause = " OR ".join(f"cat:{c}" for c in bio_categories)
+    ml_clause = " OR ".join(f"cat:{c}" for c in ml_categories)
     date_clause = (
         f"submittedDate:[{start.strftime(_ARXIV_DATE_FMT)}"
         f" TO {now.strftime(_ARXIV_DATE_FMT)}]"
     )
-    return f"({cat_clause}) AND {date_clause}"
+    return f"({bio_clause}) AND ({ml_clause}) AND {date_clause}"
 
 
 def _parse_feed(xml_text: str) -> list[dict]:
@@ -97,19 +103,20 @@ def _parse_entry(entry: ET.Element) -> dict:
         for author in entry.findall(f"{ATOM_NS}author")
     ]
 
-    primary_category_el = entry.find(f"{ARXIV_NS}primary_category")
-    primary_category = (
-        primary_category_el.get("term") if primary_category_el is not None else None
-    )
+    categories = [c.get("term") for c in entry.findall(f"{ATOM_NS}category")]
+    comment = _text(entry, f"{ARXIV_NS}comment")
+    pages_match = _PAGES_RE.search(comment)
 
     return {
         "arxiv_id": arxiv_id,
         "title": _clean_whitespace(_text(entry, f"{ATOM_NS}title")),
         "abstract": _clean_whitespace(_text(entry, f"{ATOM_NS}summary")),
         "authors": authors,
-        "link": f"https://arxiv.org/abs/{arxiv_id}",
-        "published": _text(entry, f"{ATOM_NS}published"),
-        "primary_category": primary_category,
+        "source_url": f"https://arxiv.org/abs/{arxiv_id}",
+        "categories": categories,
+        # arXiv has no page-count field; authors usually state it in the comment.
+        "pages": int(pages_match.group(1)) if pages_match else None,
+        "published": _text(entry, f"{ATOM_NS}published")[:10],
     }
 
 

@@ -1,0 +1,47 @@
+{
+  "paper": {
+    "arxiv_id": "2609.19180",
+    "title": "BioPhys-Bridge: A Benchmark for Interdisciplinary Scientific Reasoning in Physics-Grounded Biological Research",
+    "authors": ["Qingyang Xu"],
+    "source_url": "https://arxiv.org/abs/2609.19180",
+    "categories": ["cs.AI", "q-bio.QM"],
+    "pages": null,
+    "published": "2026-09-15"
+  },
+  "objective": "Introduce a 500-case benchmark that grounds LLM scientific reasoning in biophysics literature by requiring models to chain source evidence to quantitative values, physical-model assumptions, biological mechanism, and a next experimental decision, and report preliminary LLM baselines on evidence-ID attribution.",
+  "findings": [
+    {"text": "DeepSeek-V4-Flash obtains the highest evidence-ID F1 score (0.360), followed by Qwen3.7-Max (0.316) and GPT-4o-mini (0.294).", "section": "Abstract"},
+    {"text": "Gemini 2.5 Pro has nontrivial answer-token overlap (0.099) but empty parsed evidence IDs for 151 of 154 tasks, making its attribution score near zero; DeepSeek v4 Pro similarly leaves 127 of 154 outputs without parsed evidence IDs.", "section": "7 Evaluation Protocol and Baselines"}
+  ],
+  "limitations": [
+    {"text": "Expert annotation covers 81 cases, not all 500. Current baselines are preliminary... they include a lexical retrieval floor and seven LLMs, but not a human ceiling, hidden test server, repeated stochastic runs, or full rubric-based expert grading.", "section": "9 Limitations and Responsible Use"},
+    {"text": "The test set is public in this release, which supports reuse and workshop discussion but limits long-term contamination control.", "section": "9 Limitations and Responsible Use"}
+  ],
+  "future_work": [
+    {"text": "Because scientific answers are open-ended, future releases should add rubric-based expert scoring for physical-model use, quantitative consistency, mechanism correctness, uncertainty handling, and experimental feasibility.", "section": "7 Evaluation Protocol and Baselines"}
+  ],
+  "fixed_date_note": null,
+  "candidate_project": {
+    "deliverable": "A 15-20 case pilot replicating BioPhys-Bridge's evidence-to-value-to-model-to-mechanism-to-decision schema on one narrow biophysical subfield (enzyme kinetics), hand-built from open-access papers, with a results table testing whether the schema and task types generalize outside their release.",
+    "steps": [
+      "Hand-curate 15-20 evidence-grounded cases from open-access enzyme-kinetics papers, following their record schema (evidence blocks, quantitative_evidence, biophysical_model, biological_mechanism) without their MinerU pipeline.",
+      "Write derivation and mechanism_from_evidence tasks for each case with gold answers and gold evidence IDs.",
+      "Run 2-3 off-the-shelf LLMs against their de-leaked prompt format and check whether the DeepSeek > Qwen > GPT-4o-mini ordering holds on a much smaller, hand-built set."
+    ]
+  },
+  "artifacts": {
+    "code_url": null,
+    "data_public": false,
+    "checkpoints": false
+  },
+  "compute_evidence": {"text": "The shipped release used OpenAI gpt-4o for this evidence-only structuring pass.", "section": "4 Data Curation Pipeline"},
+  "tractability_evidence": {"text": "For peer review, the dataset, schema, aggregate reports, and evaluation outputs are supplied in the supplementary materials. The public dataset and code repository will be released after peer review.", "section": "8 Dataset Access and Reproducibility"},
+  "learning_delta": {
+    "unfamiliar_items": ["evidence-ID F1 attribution scoring design", "BioPhys-Bridge's case schema (evidence blocks, quantitative_evidence, biophysical_model fields)", "de-leaked prompt construction for grounded QA evaluation"],
+    "level": "bounded"
+  },
+  "disqualifier": "artifacts_unreleased: the dataset and code are stated as released only after peer review, so nothing exists yet to build on. Replicating the idea means rebuilding their curation pipeline from the paper description alone.",
+  "compute_gate": "fits_llm_api",
+  "tractability": "requires_unavailable_resources",
+  "verdict": "reject"
+}

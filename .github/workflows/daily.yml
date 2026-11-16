@@ -1,0 +1,63 @@
+name: Offshoot daily run
+
+on:
+  schedule:
+    - cron: "23 10 * * *"   # 10:23 UTC daily
+  workflow_dispatch:
+    inputs:
+      max_papers:
+        description: "Cap on extractions for this run"
+        default: "25"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offshoot   # two overlapping runs would both extract the same papers
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # state.db is gitignored (the repo is public), so it travels between
+      # runs in the Actions cache. Caches are immutable, hence a new key per
+      # run and a prefix match on restore to pick up the most recent one.
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            state.db
+            cache
+          key: offshoot-state-${{ github.run_id }}
+          restore-keys: offshoot-state-
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Run pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          MAX_PAPERS: ${{ inputs.max_papers || '25' }}
+        run: offshoot --max-papers "$MAX_PAPERS"
+
+      - name: Save state
+        if: always()   # keep what was extracted even if a later step failed
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            state.db
+            cache
+          key: offshoot-state-${{ github.run_id }}
