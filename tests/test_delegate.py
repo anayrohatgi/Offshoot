@@ -16,9 +16,9 @@ def finished(task_id):
                                    status="completed", output_file="", summary="ok", uuid="u", session_id="s")
 
 
-def result(origin=None, is_error=False):
+def result(origin=None, is_error=False, cost=None):
     return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=is_error,
-                         num_turns=1, session_id="s", origin=origin)
+                         num_turns=1, session_id="s", origin=origin, total_cost_usd=cost)
 
 
 class FakeClient:
@@ -87,3 +87,9 @@ def test_error_turn_raises():
         assert "coordinator turn failed" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+def test_returns_latest_cost_from_any_turn():
+    client = FakeClient([started("t1"), result(cost=0.10),
+                         result(origin={"kind": "task-notification"}, cost=0.25), finished("t1")])
+    assert asyncio.run(coordinator.delegate(client, "go", done=lambda: False)) == 0.25

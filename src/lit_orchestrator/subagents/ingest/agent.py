@@ -29,5 +29,4 @@ ingest_agent = AgentDefinition(
     mcpServers=[SERVER_NAME],
     model="haiku",
     maxTurns=4,
-    background=False,
 )

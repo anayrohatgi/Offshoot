@@ -2,7 +2,8 @@
 
 Two layers work together here.
 
-- A Claude session (the "coordinator agent") whose only tool is Task. It
+- A Claude session (the "coordinator agent") whose only built-in tool is the
+  delegation tool (named Task or Agent depending on the CLI version). It
   receives a directive and delegates to the ingest or extraction subagent.
   Each subagent starts with an empty context, so every Task prompt has to
   carry what that subagent needs.
@@ -70,7 +71,11 @@ Rules:
   single message so they run in parallel.
 - Never call any tool other than Task. Never retry a subagent that failed;
   the driver decides about retries.
-- After the subagents return, reply with one short status line per Task.
+- Subagents run in the background, so a Task call returns before the work is
+  done. That is expected. Do not wait, poll, or re-delegate.
+- Keep every reply to a few words. When you are notified that a background
+  task finished, reply with just "ok". Nobody reads your replies; results are
+  collected through the subagents' tool calls.
 """
 
 
@@ -123,7 +128,7 @@ def _describe(message) -> str | None:
     return None
 
 
-async def delegate(client: ClaudeSDKClient, directive: str, done, verbose: bool = False) -> None:
+async def delegate(client: ClaudeSDKClient, directive: str, done, verbose: bool = False) -> float:
     """Send one directive and return once the subagents it started have finished.
 
     The end of the coordinator agent's turn is not enough. A Task call can run
@@ -132,16 +137,20 @@ async def delegate(client: ClaudeSDKClient, directive: str, done, verbose: bool 
     AND either no started task is still running or `done()` reports that every
     expected result has arrived in RunContext. If neither happens in time it
     returns anyway, and the caller records whatever is missing as failed.
+
+    Returns the latest cumulative session cost the SDK reported.
     """
     await client.query(directive)
+    cost = [0.0]
     try:
         async with asyncio.timeout(DELEGATION_TIMEOUT_SECONDS):
-            await _wait_for_delegation(client, done, verbose)
+            await _wait_for_delegation(client, done, verbose, cost)
     except TimeoutError:
         print(f"  warning: delegation still unfinished after {DELEGATION_TIMEOUT_SECONDS // 60} minutes; moving on")
+    return cost[0]
 
 
-async def _wait_for_delegation(client: ClaudeSDKClient, done, verbose: bool) -> None:
+async def _wait_for_delegation(client: ClaudeSDKClient, done, verbose: bool, cost: list[float]) -> None:
     running: set[str] = set()
     turn_ended = False
     async for message in client.receive_messages():
@@ -157,7 +166,7 @@ async def _wait_for_delegation(client: ClaudeSDKClient, done, verbose: bool) -> 
                 running.discard(message.task_id)
         elif isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
             for block in message.content:
-                if isinstance(block, ToolUseBlock) and block.name == "Task" and not verbose:
+                if isinstance(block, ToolUseBlock) and block.name in ("Task", "Agent") and not verbose:
                     print(f"  delegated -> {block.input.get('subagent_type')}: "
                           f"{block.input.get('description', '')}")
         elif isinstance(message, ResultMessage):
@@ -167,8 +176,7 @@ async def _wait_for_delegation(client: ClaudeSDKClient, done, verbose: bool) -> 
             # own. Only a turn that answers our directive counts as its end.
             if message.origin is None or message.origin.get("kind") == "human":
                 turn_ended = True
-                if message.total_cost_usd is not None:
-                    print(f"  cost reported by the SDK so far: ${message.total_cost_usd:.2f}")
+            cost[0] = max(cost[0], message.total_cost_usd or 0.0)
 
         if turn_ended and (not running or done()):
             return
@@ -261,9 +269,9 @@ async def run(lookback_days: int, max_papers: int, dry_run: bool, verbose: bool 
 
     async with ClaudeSDKClient(options=build_options(ctx)) as client:
         print("Ingest")
-        await delegate(client, ingest_directive(lookback_days),
-                       done=lambda: ctx.candidates is not None or "ingest" in ctx.last_errors,
-                       verbose=verbose)
+        cost = await delegate(client, ingest_directive(lookback_days),
+                              done=lambda: ctx.candidates is not None or "ingest" in ctx.last_errors,
+                              verbose=verbose)
         if ctx.candidates is None:
             reason = ctx.last_errors.get("ingest", "the fetch tool was never called")
             raise RuntimeError(f"ingest produced no candidates: {reason}. "
@@ -277,9 +285,10 @@ async def run(lookback_days: int, max_papers: int, dry_run: bool, verbose: bool 
         for start in range(0, len(new), config.BATCH_SIZE):
             batch = new[start:start + config.BATCH_SIZE]
             print(f"Extraction batch {start // config.BATCH_SIZE + 1}")
-            await delegate(client, extraction_directive(batch),
-                           done=lambda: all(p["arxiv_id"] in ctx.extractions for p in batch),
-                           verbose=verbose)
+            cost = max(cost, await delegate(
+                client, extraction_directive(batch),
+                done=lambda: all(p["arxiv_id"] in ctx.extractions for p in batch),
+                verbose=verbose))
             # Persist per batch: a crash later in the run loses at most one batch.
             counts = persist_batch(conn, ctx, batch)
             passed, rejected, failed = passed + counts[0], rejected + counts[1], failed + counts[2]
@@ -291,6 +300,8 @@ async def run(lookback_days: int, max_papers: int, dry_run: bool, verbose: bool 
                   rejected=rejected, failed=failed, dispatched=dispatched)
     conn.close()
     print(f"Done: {passed} pass, {rejected} reject, {failed} failed, {dispatched} dispatched")
+    # A lower bound: work finishing after the last reported turn is not included.
+    print(f"Cost the SDK reported, at API rates: at least ${cost:.2f}")
 
     # Non-zero exit makes a scheduled run show as failed and send the default email.
     all_failed = bool(new) and failed == len(new)
