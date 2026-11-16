@@ -115,7 +115,9 @@ offshoot                             # normal run
 ```
 
 `--max-papers` caps extractions per run (default 25), which is where the
-cost is. `--lookback-days` changes the window (default 5).
+cost is. `--lookback-days` changes the window (default 5). `--verbose` prints
+every agent message, tool call, and task event, which is the first thing to
+turn on when a run misbehaves.
 
 ### On a schedule
 

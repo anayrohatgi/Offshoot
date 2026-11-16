@@ -73,4 +73,5 @@ def build_extraction_agent() -> AgentDefinition:
         mcpServers=[SERVER_NAME],
         model=EXTRACTION_MODEL,
         maxTurns=12,
+        background=False,
     )

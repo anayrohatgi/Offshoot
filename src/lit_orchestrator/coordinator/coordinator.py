@@ -24,11 +24,18 @@ import sys
 from datetime import date
 
 from claude_agent_sdk import (
+    TERMINAL_TASK_STATUSES,
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     ResultMessage,
+    TaskNotificationMessage,
+    TaskStartedMessage,
+    TaskUpdatedMessage,
+    TextBlock,
+    ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
     create_sdk_mcp_server,
 )
 
@@ -88,20 +95,83 @@ def build_options(ctx: RunContext) -> ClaudeAgentOptions:
     )
 
 
-async def delegate(client: ClaudeSDKClient, directive: str) -> None:
-    """Send one directive and wait for the coordinator agent's turn to end."""
+DELEGATION_TIMEOUT_SECONDS = 20 * 60
+
+
+def _describe(message) -> str | None:
+    """One line per message for --verbose, so a failed run shows what the agents did."""
+    who = "subagent" if getattr(message, "parent_tool_use_id", None) else "coordinator"
+    if isinstance(message, (AssistantMessage, UserMessage)) and isinstance(message.content, list):
+        parts = []
+        for block in message.content:
+            if isinstance(block, TextBlock) and block.text.strip():
+                parts.append(f"says: {block.text.strip()[:300]}")
+            elif isinstance(block, ToolUseBlock):
+                parts.append(f"calls {block.name} {str(block.input)[:200]}")
+            elif isinstance(block, ToolResultBlock):
+                flag = "ERROR " if block.is_error else ""
+                parts.append(f"tool result: {flag}{str(block.content)[:300]}")
+        return f"    [{who}] " + " | ".join(parts) if parts else None
+    if isinstance(message, TaskStartedMessage):
+        return f"    [task {message.task_id}] started: {message.description}"
+    if isinstance(message, TaskNotificationMessage):
+        return f"    [task {message.task_id}] {message.status}: {message.summary[:200]}"
+    if isinstance(message, TaskUpdatedMessage):
+        return f"    [task {message.task_id}] update: {message.patch}"
+    if isinstance(message, ResultMessage):
+        return f"    [turn ended] origin={message.origin} error={message.is_error}"
+    return None
+
+
+async def delegate(client: ClaudeSDKClient, directive: str, done, verbose: bool = False) -> None:
+    """Send one directive and return once the subagents it started have finished.
+
+    The end of the coordinator agent's turn is not enough. A Task call can run
+    its subagent in the background: the call returns at once, the turn ends,
+    and the subagent is still working. So this waits until the turn has ended
+    AND either no started task is still running or `done()` reports that every
+    expected result has arrived in RunContext. If neither happens in time it
+    returns anyway, and the caller records whatever is missing as failed.
+    """
     await client.query(directive)
-    async for message in client.receive_response():
-        if isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
+    try:
+        async with asyncio.timeout(DELEGATION_TIMEOUT_SECONDS):
+            await _wait_for_delegation(client, done, verbose)
+    except TimeoutError:
+        print(f"  warning: delegation still unfinished after {DELEGATION_TIMEOUT_SECONDS // 60} minutes; moving on")
+
+
+async def _wait_for_delegation(client: ClaudeSDKClient, done, verbose: bool) -> None:
+    running: set[str] = set()
+    turn_ended = False
+    async for message in client.receive_messages():
+        if verbose and (line := _describe(message)):
+            print(line)
+
+        if isinstance(message, TaskStartedMessage):
+            running.add(message.task_id)
+        elif isinstance(message, TaskNotificationMessage):
+            running.discard(message.task_id)
+        elif isinstance(message, TaskUpdatedMessage):
+            if (message.status or message.patch.get("status")) in TERMINAL_TASK_STATUSES:
+                running.discard(message.task_id)
+        elif isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
             for block in message.content:
-                if isinstance(block, ToolUseBlock) and block.name == "Task":
+                if isinstance(block, ToolUseBlock) and block.name == "Task" and not verbose:
                     print(f"  delegated -> {block.input.get('subagent_type')}: "
                           f"{block.input.get('description', '')}")
         elif isinstance(message, ResultMessage):
             if message.is_error:
                 raise RuntimeError(f"coordinator turn failed: {message.result or message.subtype}")
-            if message.total_cost_usd is not None:
-                print(f"  cost reported by the SDK so far: ${message.total_cost_usd:.2f}")
+            # A background task finishing makes the session start a turn of its
+            # own. Only a turn that answers our directive counts as its end.
+            if message.origin is None or message.origin.get("kind") == "human":
+                turn_ended = True
+                if message.total_cost_usd is not None:
+                    print(f"  cost reported by the SDK so far: ${message.total_cost_usd:.2f}")
+
+        if turn_ended and (not running or done()):
+            return
 
 
 def ingest_directive(lookback_days: int) -> str:
@@ -182,7 +252,7 @@ def dispatch_pending(conn, dry_run: bool) -> tuple[int, int]:
     return dispatched, errors
 
 
-async def run(lookback_days: int, max_papers: int, dry_run: bool) -> int:
+async def run(lookback_days: int, max_papers: int, dry_run: bool, verbose: bool = False) -> int:
     config.load_env()
     conn = db.connect(config.STATE_DB)
     run_id = db.start_run(conn)
@@ -191,9 +261,13 @@ async def run(lookback_days: int, max_papers: int, dry_run: bool) -> int:
 
     async with ClaudeSDKClient(options=build_options(ctx)) as client:
         print("Ingest")
-        await delegate(client, ingest_directive(lookback_days))
+        await delegate(client, ingest_directive(lookback_days),
+                       done=lambda: ctx.candidates is not None or "ingest" in ctx.last_errors,
+                       verbose=verbose)
         if ctx.candidates is None:
-            raise RuntimeError("ingest subagent returned without fetching candidates")
+            reason = ctx.last_errors.get("ingest", "the fetch tool was never called")
+            raise RuntimeError(f"ingest produced no candidates: {reason}. "
+                               "Rerun with --verbose to see what each agent did.")
         if len(ctx.candidates) >= config.MAX_FETCH:
             print(f"  warning: hit the {config.MAX_FETCH}-paper fetch cap; older papers were not seen")
 
@@ -203,7 +277,9 @@ async def run(lookback_days: int, max_papers: int, dry_run: bool) -> int:
         for start in range(0, len(new), config.BATCH_SIZE):
             batch = new[start:start + config.BATCH_SIZE]
             print(f"Extraction batch {start // config.BATCH_SIZE + 1}")
-            await delegate(client, extraction_directive(batch))
+            await delegate(client, extraction_directive(batch),
+                           done=lambda: all(p["arxiv_id"] in ctx.extractions for p in batch),
+                           verbose=verbose)
             # Persist per batch: a crash later in the run loses at most one batch.
             counts = persist_batch(conn, ctx, batch)
             passed, rejected, failed = passed + counts[0], rejected + counts[1], failed + counts[2]
@@ -228,8 +304,10 @@ def main() -> None:
                         help="cap on extractions this run (the expensive part)")
     parser.add_argument("--dry-run", action="store_true",
                         help="extract and score, but do not create Google Docs")
+    parser.add_argument("--verbose", action="store_true",
+                        help="print every agent message, tool call, and task event")
     args = parser.parse_args()
-    sys.exit(asyncio.run(run(args.lookback_days, args.max_papers, args.dry_run)))
+    sys.exit(asyncio.run(run(args.lookback_days, args.max_papers, args.dry_run, args.verbose)))
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ def build_ingest_tools(ctx: RunContext) -> list[SdkMcpTool[Any]]:
                 max_results=args["max_results"],
             )
         except Exception as exc:  # network or XML failure: report, don't crash the run
+            ctx.last_errors["ingest"] = f"arXiv fetch failed: {exc}"
             return {"content": [{"type": "text", "text": f"arXiv fetch failed: {exc}"}],
                     "is_error": True}
         ctx.candidates = papers

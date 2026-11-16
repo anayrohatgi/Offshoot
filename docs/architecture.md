@@ -125,6 +125,7 @@ calendar: deciding to commit to a project is a human step.
 | A paper has no LaTeX source or HTML | Recorded as failed. It is never scored from the abstract alone. |
 | The model submits an inconsistent verdict | Rejected by the validator; the subagent resubmits. |
 | A subagent ends without submitting | The driver finds nothing in `RunContext` for that id and records a failure. |
+| A Task call runs its subagent in the background, so the coordinator's turn ends first | `delegate()` keeps waiting until every started task has finished or the expected results have arrived. |
 | Google upload fails | The draft stays queued; the run exits non-zero so the failure is visible. |
 | The Actions cache holding `state.db` is evicted | Papers in the current window are extracted again and passes are dispatched again. Caches expire after seven days without use, so this needs a week of no runs. |
 | The coordinator agent calls a stage tool itself instead of delegating | Possible: the stage tools are approved for the whole session so that subagents can use them. Its system prompt forbids it, and a result submitted that way would still pass the same validation. It has no other built-in tools. |
