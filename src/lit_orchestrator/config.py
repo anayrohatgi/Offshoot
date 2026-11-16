@@ -30,7 +30,7 @@ MAX_ATTEMPTS = 2         # runs that may try a paper before it is given up on
 
 SERVER_NAME = "offshoot"
 COORDINATOR_MODEL = "sonnet"
-EXTRACTION_MODEL = "sonnet"   # the main cost driver; "haiku" is cheaper and less careful
+EXTRACTION_MODEL = "haiku"   # set to haiku to reduce cost; "haiku" is cheaper but less careful
 
 _ENV_KEYS = (
     "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
